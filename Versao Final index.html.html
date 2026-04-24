@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kinect Spectrum - Fosco & Separado</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: white; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+        
+        #left-panel { 
+            position: fixed; top: 20px; left: 20px; 
+            z-index: 100; display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .glass-box {
+            background: rgba(20, 20, 20, 0.95); padding: 15px; 
+            border-radius: 12px; border: 1px solid #444; 
+            font-family: monospace;
+        }
+
+        #cor-ativa { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #fff; margin-top: 5px; }
+
+        #wheel-container { position: relative; width: 110px; height: 110px; cursor: crosshair; }
+        #colorWheel { border-radius: 50%; width: 100%; height: 100%; }
+        
+        #zoom-circle {
+            position: absolute; width: 40px; height: 40px;
+            border-radius: 50%; border: 2px solid #fff;
+            pointer-events: none; display: none; z-index: 110;
+        }
+
+        #menu {
+            position: fixed; right: -220px; top: 0; height: 100%;
+            width: 200px; background: #111; border-left: 4px solid #00ff88;
+            transition: 0.3s; z-index: 200; display: flex; flex-direction: column; padding: 20px;
+        }
+        #menu:hover { right: 0; }
+        #menu-tab {
+            position: absolute; left: -40px; top: 50%; transform: translateY(-50%);
+            background: #00ff88; color: #000; padding: 10px 5px;
+            border-radius: 5px 0 0 5px; cursor: pointer; font-weight: bold; writing-mode: vertical-rl;
+        }
+
+        .section-title { font-size: 10px; color: #00ff88; margin: 12px 0 5px; text-transform: uppercase; }
+        .btn { 
+            background: #222; color: #eee; border: 1px solid #444; 
+            padding: 10px; margin-bottom: 5px; cursor: pointer; 
+            border-radius: 6px; font-size: 10px; font-weight: bold; width: 100%;
+        }
+        .btn.active { background: #00ff88; color: #000; border-color: #fff; }
+    </style>
+</head>
+<body>
+
+    <div id="left-panel">
+        <div class="glass-box">
+            <div>MODO: <span id="txt-sensor" style="color: #00ff88">MOUSE</span></div>
+            <div>TIPO: <span id="txt-estilo" style="color: #00ff88">CANETINHA</span></div>
+            <div id="cor-ativa" style="background-color: #00ff88;"></div>
+        </div>
+
+        <div class="glass-box" id="wheel-container">
+            <canvas id="colorWheel" width="110" height="110"></canvas>
+            <div id="zoom-circle"></div>
+        </div>
+    </div>
+
+    <div id="menu">
+        <div id="menu-tab">PAINEL</div>
+        
+        <div class="section-title">Estilos</div>
+        <button id="btn-canetinha" class="btn active" onclick="setEstilo('canetinha')">CANETINHA</button>
+        <button id="btn-pincel" class="btn" onclick="setEstilo('pincel')">PINCEL (SPRAY)</button>
+        <button id="btn-pontilhado" class="btn" onclick="setEstilo('pontilhado')">PONTILHADO ✨</button>
+
+        <div class="section-title">Entrada</div>
+        <button id="btn-mouse" class="btn active" onclick="setSensor('mouse')">MOUSE</button>
+        <button id="btn-lazer" class="btn" onclick="setSensor('lazer')">MODO LAZER 🪄</button>
+        <button id="btn-infra" class="btn" onclick="setSensor('infra')">INFRA (SMOOTH)</button>
+        
+        <button class="btn" style="background: #cc0000; color: white; margin-top: auto;" onclick="limpar()">LIMPAR (Q)</button>
+    </div>
+
+    <video id="v" width="640" height="480" style="display:none"></video>
+    <canvas id="c"></canvas>
+
+    <script>
+        const video = document.getElementById('v');
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        const wheel = document.getElementById('colorWheel');
+        const wCtx = wheel.getContext('2d');
+        const zoom = document.getElementById('zoom-circle');
+        const wheelContainer = document.getElementById('wheel-container');
+
+        let modoSensor = 'mouse', estiloTraço = 'canetinha', corAtual = "#00ff88";
+        let lastX = null, lastY = null, smoothX = 0, smoothY = 0, isMouseDown = false;
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        function drawWheel() {
+            wCtx.clearRect(0,0,110,110);
+            for(let i=0; i<360; i++) {
+                wCtx.beginPath(); wCtx.moveTo(55, 55);
+                wCtx.arc(55, 55, 55, (i-1)*Math.PI/180, i*Math.PI/180);
+                wCtx.fillStyle = `hsl(${i}, 100%, 50%)`; wCtx.fill();
+            }
+        }
+        drawWheel();
+
+        wheelContainer.onmousemove = (e) => {
+            const data = wCtx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
+            if (data[3] === 0) { zoom.style.display = 'none'; return; }
+            zoom.style.display = 'block';
+            zoom.style.left = (e.offsetX - 20) + 'px'; zoom.style.top = (e.offsetY - 20) + 'px';
+            zoom.style.backgroundColor = `rgb(${data[0]},${data[1]},${data[2]})`;
+        };
+
+        wheelContainer.onclick = (e) => {
+            const data = wCtx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
+            if (data[3] === 0 || (data[0] === 0 && data[1] === 0 && data[2] === 0)) return;
+            corAtual = `rgb(${data[0]},${data[1]},${data[2]})`;
+            document.getElementById('cor-ativa').style.backgroundColor = corAtual;
+        };
+
+        function setEstilo(e) {
+            estiloTraço = e;
+            ['canetinha','pincel','pontilhado'].forEach(s => document.getElementById('btn-'+s).classList.remove('active'));
+            document.getElementById('btn-' + e).classList.add('active');
+            document.getElementById('txt-estilo').innerText = e.toUpperCase();
+        }
+
+        function setSensor(s) {
+            limpar(); 
+            modoSensor = s;
+            ['mouse','lazer','infra'].forEach(m => document.getElementById('btn-'+m)?.classList.remove('active'));
+            document.getElementById('btn-'+s).classList.add('active');
+            document.getElementById('txt-sensor').innerText = s.toUpperCase();
+            lastX = null;
+        }
+
+        window.onmousedown = () => isMouseDown = true;
+        window.onmouseup = () => { isMouseDown = false; lastX = null; };
+        window.onmousemove = (e) => {
+            if((modoSensor === 'mouse' || modoSensor === 'lazer') && isMouseDown) {
+                if (e.clientX > 150 && e.clientX < window.innerWidth - 50) desenhar(e.clientX, e.clientY);
+            }
+        };
+
+        function desenhar(tx, ty) {
+            let ease = (modoSensor === 'infra') ? 0.2 : 0.4;
+            
+            if (lastX === null) {
+                smoothX = tx; smoothY = ty;
+            } else {
+                smoothX += (tx - smoothX) * ease;
+                smoothY += (ty - smoothY) * ease;
+                
+                ctx.fillStyle = corAtual;
+                ctx.strokeStyle = corAtual;
+                ctx.lineCap = "round";
+
+                if (estiloTraço === 'pontilhado') {
+                    // CÁLCULO DE DISTÂNCIA
+                    let dist = Math.sqrt(Math.pow(smoothX - lastX, 2) + Math.pow(smoothY - lastY, 2));
+                    
+                    if (dist > 30) { // Distância um pouco maior para ficar bem separado
+                        ctx.globalAlpha = 1.0; // GARANTE QUE SEJA FOSCO
+                        ctx.shadowBlur = (modoSensor === 'lazer') ? 15 : 0; // Brilho se for lazer
+                        ctx.shadowColor = corAtual;
+                        
+                        ctx.beginPath();
+                        ctx.arc(smoothX, smoothY, 12, 0, Math.PI * 2); // Pontos maiores e foscos
+                        ctx.fill();
+                        
+                        lastX = smoothX; lastY = smoothY;
+                    }
+                    return; 
+                } else {
+                    // Estilos normais (Pincel ou Canetinha)
+                    if (modoSensor === 'lazer') {
+                        ctx.shadowBlur = 20; ctx.shadowColor = corAtual;
+                        ctx.lineWidth = 6; ctx.globalAlpha = 1.0;
+                    } else {
+                        ctx.shadowBlur = 0;
+                        ctx.globalAlpha = (estiloTraço === 'pincel') ? 0.2 : 1.0;
+                        ctx.lineWidth = (estiloTraço === 'pincel') ? 35 : 12;
+                    }
+                    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(smoothX, smoothY); ctx.stroke();
+                }
+            }
+            lastX = smoothX; lastY = smoothY;
+        }
+
+        function limpar() { 
+            ctx.globalAlpha = 1.0; ctx.shadowBlur = 0;
+            ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height); 
+            lastX = null; 
+        }
+
+        window.onkeydown = (e) => { if (e.key.toLowerCase() === 'q') limpar(); };
+
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+        .then(s => { video.srcObject = s; video.play(); requestAnimationFrame(loop); });
+
+        function loop() {
+            if (modoSensor === 'lazer') {
+                ctx.globalAlpha = 0.15; ctx.fillStyle = "#000000";
+                ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1.0;
+            }
+
+            if (modoSensor === 'infra') {
+                const temp = document.createElement('canvas'); temp.width = 80; temp.height = 60;
+                const tCtx = temp.getContext('2d'); tCtx.drawImage(video, 0, 0, 80, 60);
+                const data = tCtx.getImageData(0, 0, 80, 60).data;
+                let bx = 0, by = 0, count = 0, maxB = 0;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    let b = (data[i] + data[i+1] + data[i+2]) / 3;
+                    if (b > maxB) maxB = b;
+                }
+
+                if (maxB > 190) {
+                    for (let i = 0; i < data.length; i += 4) {
+                        let b = (data[i] + data[i+1] + data[i+2]) / 3;
+                        if (b >= maxB - 5) {
+                            let idx = i/4; bx += idx % 80; by += Math.floor(idx/80); count++;
+                        }
+                    }
+                    if (count > 0) {
+                        let targetX = canvas.width - ((bx/count) * (canvas.width/80));
+                        let targetY = (by/count) * (canvas.height/60);
+                        desenhar(targetX, targetY);
+                    }
+                } else { lastX = null; }
+            }
+            requestAnimationFrame(loop);
+        }
+    </script>
+</body>
+</html>
